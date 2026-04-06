@@ -83,40 +83,12 @@ def rotate_session(session_token, ip_address=None, user_agent=None):
 def menu():
     return FileResponse("./html/menu.html", media_type="text/html")
 
-@app.get("/vulnerable/register")
-def vulnerable_register():
-    return FileResponse("./html/vuln/register.html", media_type="text/html")
-
-@app.post("/vulnerable/register")
-def vulnerable_register(user: UserRegister):
-    print("salut")
-    conn = get_db_connection()
-    db = conn.cursor()
-
-    db.execute("SELECT * FROM users WHERE email = ?", (user.email,))
-    if db.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="User deja existent")
-
-    password_hash = hashlib.md5(user.password.encode()).hexdigest()
-    
-    db.execute(
-        "INSERT INTO users (email, password_hash) VALUES (?, ?)", 
-        (user.email, password_hash)
-    )
-
-    conn.commit()
-    conn.close()
-    
-    return {"message": "Utilizator înregistrat cu succes!"}
-
-
-@app.get("/nonvulnerable/register")
-def get_nonvulnerable_register():
+@app.get("/register")
+def get_register():
     return FileResponse("./html/register.html", media_type="text/html")
 
-@app.post("/nonvulnerable/register")
-def post_nonvulnerable_register(user: UserRegister):
+@app.post("/register")
+def post_register(user: UserRegister):
 
     print("A fost accesata routa de inregistrare non-vulnerabila")
 
@@ -148,46 +120,12 @@ def post_nonvulnerable_register(user: UserRegister):
     
     return {"message": "Utilizator înregistrat cu succes!"}
 
-
-
-@app.get("/vulnerable/login")
-def vulnerable_login():
+@app.get("/login")
+def get_login():
     return FileResponse("./html/login.html", media_type="text/html")
 
-@app.post("/vulnerable/login")
-def vulnerable_login(user: UserLogin, response: Response):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
-    db_user = cursor.fetchone()
-    
-    if not db_user:
-        conn.close()
-        raise HTTPException(status_code=404, detail="User inexistent")
-    
-    password_hash = hashlib.md5(user.password.encode()).hexdigest()
-    
-    if db_user['password_hash'] != password_hash:
-        conn.close()
-        raise HTTPException(status_code=401, detail="Parolă greșită")
-    
-    conn.close()
-    
-    # VULNERABILITATE 4.5: Gestionare nesigură a sesiunilor - Setăm un cookie super simplu, fără securitate
-    # Lipsește HttpOnly, Secure și SameSite.
-    session_token = f"session_for_{db_user['id']}" # Token extrem de predictibil
-    response.set_cookie(key="session_id", value=session_token)
-    
-    return {"message": "Login reușit!"}
-
-
-@app.get("/nonvulnerable/login")
-def get_nonvulnerable_login():
-    return FileResponse("./html/login.html", media_type="text/html")
-
-@app.post("/nonvulnerable/login")
-def post_nonvulnerable_login(user: UserLogin, response: Response, request: Request):
+@app.post("/login")
+def post_login(user: UserLogin, response: Response, request: Request):
 
     print("A fost accesata routa de login non-vulnerabila")
 
@@ -234,8 +172,8 @@ def post_nonvulnerable_login(user: UserLogin, response: Response, request: Reque
     
     return {"message": "Login reușit! Sesiune securizată creată."}
 
-@app.post("/nonvulnerable/logout")
-def post_nonvulnerable_logout(request: Request, response: Response):
+@app.post("/logout")
+def post_logout(request: Request, response: Response):
     """Logout securizat - invalidează sesiunea"""
     session_token = request.cookies.get("session_token")
     
@@ -252,8 +190,8 @@ def post_nonvulnerable_logout(request: Request, response: Response):
     
     return {"message": "Logout reușit! Sesiunea a fost invalidată."}
 
-@app.get("/nonvulnerable/dashboard")
-def get_nonvulnerable_dashboard(request: Request):
+@app.get("/dashboard")
+def get_dashboard(request: Request):
     """Rută protejată care necesită autentificare"""
     session_token = request.cookies.get("session_token")
     
