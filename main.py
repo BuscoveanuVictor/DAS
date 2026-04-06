@@ -1,12 +1,9 @@
-from fastapi import FastAPI, HTTPException, Response, Request, Depends
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
 from pydantic import BaseModel
 import sqlite3
 import hashlib
 import secrets
-import os
 from datetime import datetime, timedelta
 
 app = FastAPI()
@@ -111,44 +108,6 @@ def vulnerable_register(user: UserRegister):
     return {"message": "Utilizator înregistrat cu succes!"}
 
 
-@app.get("/nonvulnerable/register")
-def get_nonvulnerable_register():
-    return FileResponse("./html/register.html", media_type="text/html")
-
-@app.post("/nonvulnerable/register")
-def post_nonvulnerable_register(user: UserRegister):
-
-    print("A fost accesata routa de inregistrare non-vulnerabila")
-
-    conn = get_db_connection()
-    db = conn.cursor()
-
-    db.execute("SELECT * FROM users WHERE email = ?", (user.email,))
-    if db.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="User deja existent")
-
-    # Validare parolă: trebuie să aibă cel puțin 6 caractere și să conțină atât litere cât și cifre
-    if not (len(user.password) >= 6 and any(c.isalpha() for c in user.password) and any(c.isdigit() for c in user.password)):
-        conn.close()
-        raise HTTPException(status_code=400, detail="Parola nu îndeplinește cerințele de securitate")
-
-    # Folosim scrypt pentru hash-uirea parolei
-    import os
-    salt = os.urandom(16)
-    password_hash = hashlib.scrypt(user.password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
-    
-    db.execute(
-        "INSERT INTO users (email, password_hash) VALUES (?, ?)", 
-        (user.email, password_hash.hex())
-    )
-
-    conn.commit()
-    conn.close()
-    
-    return {"message": "Utilizator înregistrat cu succes!"}
-
-
 
 @app.get("/vulnerable/login")
 def vulnerable_login():
@@ -180,109 +139,5 @@ def vulnerable_login(user: UserLogin, response: Response):
     response.set_cookie(key="session_id", value=session_token)
     
     return {"message": "Login reușit!"}
-
-
-@app.get("/nonvulnerable/login")
-def get_nonvulnerable_login():
-    return FileResponse("./html/login.html", media_type="text/html")
-
-@app.post("/nonvulnerable/login")
-def post_nonvulnerable_login(user: UserLogin, response: Response, request: Request):
-
-    print("A fost accesata routa de login non-vulnerabila")
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Verificare user existent
-    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
-    db_user = cursor.fetchone()
-    
-    if not db_user:
-        conn.close()
-        raise HTTPException(status_code=401, detail="Email sau parolă incorectă")  # Mesaj generic pentru securitate
-    
-    # Verificare parolă cu scrypt
-    stored_hash = bytes.fromhex(db_user['password_hash'])
-    salt = stored_hash[:16]  # Presupunem că primii 16 bytes sunt salt-ul
-    try:
-        computed_hash = hashlib.scrypt(user.password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
-        if computed_hash != stored_hash:
-            print("Computed hash nu se potrivește cu hash-ul stocat" + computed_hash + " vs " + db_user['password_hash'])
-            conn.close()
-            raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
-    except:
-        conn.close()
-        raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
-    
-    conn.close()
-    
-    # Creare sesiune securizată
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-    session_token = create_session(db_user['id'], ip_address, user_agent)
-    
-    # Setare cookie securizat
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,      # Nu poate fi accesat din JavaScript
-        secure=False,       # False pentru development (localhost)
-        samesite="lax",     # Protecție CSRF
-        max_age=43200       # 12 ore în secunde
-    )
-    
-    return {"message": "Login reușit! Sesiune securizată creată."}
-
-@app.post("/nonvulnerable/logout")
-def post_nonvulnerable_logout(request: Request, response: Response):
-    """Logout securizat - invalidează sesiunea"""
-    session_token = request.cookies.get("session_token")
-    
-    if session_token:
-        invalidate_session(session_token)
-    
-    # Șterge cookie-ul
-    response.delete_cookie(
-        key="session_token",
-        httponly=True,
-        secure=False,
-        samesite="lax"
-    )
-    
-    return {"message": "Logout reușit! Sesiunea a fost invalidată."}
-
-@app.get("/nonvulnerable/dashboard")
-def get_nonvulnerable_dashboard(request: Request):
-    """Rută protejată care necesită autentificare"""
-    session_token = request.cookies.get("session_token")
-    
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Autentificare necesară")
-    
-    user_id = validate_session(session_token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Sesiune expirată sau invalidă")
-    
-    # Rotește token-ul pentru securitate suplimentară
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-    new_token = rotate_session(session_token, ip_address, user_agent)
-    
-    if new_token:
-        # Returnează răspuns cu token nou
-        response = FileResponse("./html/dashboard.html", media_type="text/html")
-        response.set_cookie(
-            key="session_token",
-            value=new_token,
-            httponly=True,
-            secure=False,
-            samesite="lax",
-            max_age=86400
-        )
-        return response
-    else:
-        raise HTTPException(status_code=401, detail="Eroare la rotirea sesiunii")
-
 
 
