@@ -1,3 +1,5 @@
+import base64
+
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -15,6 +17,10 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+    new_password: str
 
 # Funcție helper pentru conectarea la baza de date
 def get_db_connection():
@@ -76,16 +82,44 @@ def rotate_session(session_token, ip_address=None, user_agent=None):
         return create_session(user_id, ip_address, user_agent)
     return None
 
+
 @app.get("/")
-def menu():
-    return FileResponse("./html/menu.html", media_type="text/html")
+def login():
+    return FileResponse("./html/login.html", media_type="text/html")
 
-@app.get("/vulnerable/register")
-def vulnerable_register():
-    return FileResponse("./html/vuln/register.html", media_type="text/html")
+@app.post("/login")
+def login(user: UserLogin, response: Response):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
+    db_user = cursor.fetchone()
+    
+    if not db_user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User inexistent")
+    
+    password_hash = hashlib.md5(user.password.encode()).hexdigest()
+    
+    if db_user['password_hash'] != password_hash:
+        conn.close()
+        raise HTTPException(status_code=401, detail="Parolă greșită")
+    
+    conn.close()
+    
+    # Lipseste HttpOnly, Secure si SameSite
+    session_token = f"{db_user['id']}" 
+    response.set_cookie(key="session_id", value=session_token)
+    
+    return {"message": "Login reușit!"}
 
-@app.post("/vulnerable/register")
-def vulnerable_register(user: UserRegister):
+
+@app.get("/register")
+def register():
+    return FileResponse("./html/register.html", media_type="text/html")
+
+@app.post("/register")
+def register(user: UserRegister):
     print("salut")
     conn = get_db_connection()
     db = conn.cursor()
@@ -108,36 +142,74 @@ def vulnerable_register(user: UserRegister):
     return {"message": "Utilizator înregistrat cu succes!"}
 
 
+@app.get("/dashboard")
+def dashboard():
+    return FileResponse("./html/dashboard.html", media_type="text/html")
 
-@app.get("/vulnerable/login")
-def vulnerable_login():
-    return FileResponse("./html/login.html", media_type="text/html")
 
-@app.post("/vulnerable/login")
-def vulnerable_login(user: UserLogin, response: Response):
+@app.get("/reset-password")
+def reset_password_page():
+    return FileResponse("./html/reset_password.html", media_type="text/html")
+
+# Modele Pydantic pentru request-uri
+class ResetRequest(BaseModel):
+    email: str
+
+class PasswordChange(BaseModel):
+    token: str
+    new_password: str
+
+@app.post("/request-reset")
+def request_password_reset(data: ResetRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
-    db_user = cursor.fetchone()
-    
-    if not db_user:
+    cursor.execute("SELECT * FROM users WHERE email = ?", (data.email,))
+    user = cursor.fetchone()
+
+    if user:
+        # ⚠️ VULNERABILITATEA 1: Token predictibil (ușor de ghicit)
+        # Transformăm pur și simplu adresa de email în Base64. 
+        # Nu există nicio sursă de "entropie" (aleatoriu).
+        token = base64.urlsafe_b64encode(data.email.encode('utf-8')).decode('utf-8').rstrip('=')
+        
+        # Salvăm token-ul. 
+        # ⚠️ VULNERABILITATEA 2: Nu asociem nicio dată de expirare (timestamp).
+        cursor.execute("INSERT INTO reset_tokens (email, token) VALUES (?, ?)", (data.email, token))
+        conn.commit()
         conn.close()
-        raise HTTPException(status_code=404, detail="User inexistent")
+        
+        # Simulăm trimiterea unui email
+        return {"message": "Link trimis!", "link": f"http://127.0.0.1:8000/reset-password?token={token}"}
+        
+    # Păstrăm totuși protecția anti-enumerare despre care am vorbit anterior
+    conn.close()
+    return {"message": "Dacă emailul există, s-a trimis un link."}
+
+@app.post("/reset-password")
+def reset_password(data: PasswordChange):
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    password_hash = hashlib.md5(user.password.encode()).hexdigest()
+    # Verificăm dacă tokenul există în baza de date
+    normalized_token = data.token.rstrip('=')
+    cursor.execute("SELECT email FROM reset_tokens WHERE token = ? OR rtrim(token, '=') = ?", (data.token, normalized_token))
+    result = cursor.fetchone()
     
-    if db_user['password_hash'] != password_hash:
+    # ⚠️ VULNERABILITATEA 2 (Continuare): Acceptăm tokenul oricând, 
+    # chiar și după 5 ani de la generare.
+    if not result:
         conn.close()
-        raise HTTPException(status_code=401, detail="Parolă greșită")
+        raise HTTPException(status_code=400, detail="Token invalid")
     
+    # Resetăm efectiv parola
+    email = result[0]
+    cursor.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hashlib.md5(data.new_password.encode()).hexdigest(), email))
+    conn.commit()
     conn.close()
     
-    # VULNERABILITATE 4.5: Gestionare nesigură a sesiunilor - Setăm un cookie super simplu, fără securitate
-    # Lipsește HttpOnly, Secure și SameSite.
-    session_token = f"session_for_{db_user['id']}" # Token extrem de predictibil
-    response.set_cookie(key="session_id", value=session_token)
+    # ⚠️ VULNERABILITATEA 3: Token reutilizabil.
+    # Intenționat "uităm" să ștergem tokenul din dicționar după folosire.
+    # În mod normal, ar trebui să facem: del reset_tokens[token]
     
-    return {"message": "Login reușit!"}
-
-
+    return {"message": f"Parola pentru {email} a fost resetată cu succes!"}
