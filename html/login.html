@@ -51,16 +51,9 @@
         const passwordVal = document.getElementById('password').value;
         const messageDiv = document.getElementById('message');
 
-        let API;
-
-        if(window.location.href.includes("nonvulnerable")){
-            API = "http://127.0.0.1:8000/nonvulnerable/login";   
-        } else {
-            API = "http://127.0.0.1:8000/vulnerable/login";
-        }
+        const API="http://127.0.0.1:8000/login";
 
         try {
-            
             // Trimitem request-ul către endpoint-ul de login
             const response = await fetch(API, {
                 method: 'POST',
@@ -73,9 +66,7 @@
             const data = await response.json();
 
             if (response.ok) {
-                messageDiv.style.color = 'green';
-                messageDiv.innerText = "Succes: " + data.message;
-                // Aici în viitor poți face un redirect către o pagină "dashboard.html"
+                window.location.href = "/dashboard";
             } else {
                 messageDiv.style.color = 'red';
                 // Aici se vede vulnerabilitatea 4.4 (User Enumeration)!

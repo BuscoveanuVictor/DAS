@@ -1,12 +1,11 @@
-from fastapi import FastAPI, HTTPException, Response, Request, Depends
+import base64
+
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
 from pydantic import BaseModel
 import sqlite3
 import hashlib
 import secrets
-import os
 from datetime import datetime, timedelta
 
 app = FastAPI()
@@ -18,6 +17,10 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+    new_password: str
 
 # Funcție helper pentru conectarea la baza de date
 def get_db_connection():
@@ -79,19 +82,45 @@ def rotate_session(session_token, ip_address=None, user_agent=None):
         return create_session(user_id, ip_address, user_agent)
     return None
 
+
 @app.get("/")
-def menu():
-    return FileResponse("./html/menu.html", media_type="text/html")
+def login():
+    return FileResponse("./html/login.html", media_type="text/html")
+
+@app.post("/login")
+def login(user: UserLogin, response: Response):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
+    db_user = cursor.fetchone()
+    
+    if not db_user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User inexistent")
+    
+    password_hash = hashlib.md5(user.password.encode()).hexdigest()
+    
+    if db_user['password_hash'] != password_hash:
+        conn.close()
+        raise HTTPException(status_code=401, detail="Parolă greșită")
+    
+    conn.close()
+    
+    # Lipseste HttpOnly, Secure si SameSite
+    session_token = f"{db_user['id']}" 
+    response.set_cookie(key="session_id", value=session_token)
+    
+    return {"message": "Login reușit!"}
+
 
 @app.get("/register")
-def get_register():
+def register():
     return FileResponse("./html/register.html", media_type="text/html")
 
 @app.post("/register")
-def post_register(user: UserRegister):
-
-    print("A fost accesata routa de inregistrare non-vulnerabila")
-
+def register(user: UserRegister):
+    print("salut")
     conn = get_db_connection()
     db = conn.cursor()
 
@@ -100,19 +129,11 @@ def post_register(user: UserRegister):
         conn.close()
         raise HTTPException(status_code=400, detail="User deja existent")
 
-    # Validare parolă: trebuie să aibă cel puțin 6 caractere și să conțină atât litere cât și cifre
-    if not (len(user.password) >= 6 and any(c.isalpha() for c in user.password) and any(c.isdigit() for c in user.password)):
-        conn.close()
-        raise HTTPException(status_code=400, detail="Parola nu îndeplinește cerințele de securitate")
-
-    # Folosim scrypt pentru hash-uirea parolei
-    import os
-    salt = os.urandom(16)
-    password_hash = hashlib.scrypt(user.password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
+    password_hash = hashlib.md5(user.password.encode()).hexdigest()
     
     db.execute(
         "INSERT INTO users (email, password_hash) VALUES (?, ?)", 
-        (user.email, password_hash.hex())
+        (user.email, password_hash)
     )
 
     conn.commit()
@@ -120,107 +141,75 @@ def post_register(user: UserRegister):
     
     return {"message": "Utilizator înregistrat cu succes!"}
 
-@app.get("/login")
-def get_login():
-    return FileResponse("./html/login.html", media_type="text/html")
 
-@app.post("/login")
-def post_login(user: UserLogin, response: Response, request: Request):
+@app.get("/dashboard")
+def dashboard():
+    return FileResponse("./html/dashboard.html", media_type="text/html")
 
-    print("A fost accesata routa de login non-vulnerabila")
 
+@app.get("/reset-password")
+def reset_password_page():
+    return FileResponse("./html/reset_password.html", media_type="text/html")
+
+# Modele Pydantic pentru request-uri
+class ResetRequest(BaseModel):
+    email: str
+
+class PasswordChange(BaseModel):
+    token: str
+    new_password: str
+
+@app.post("/request-reset")
+def request_password_reset(data: ResetRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Verificare user existent
-    cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
-    db_user = cursor.fetchone()
-    
-    if not db_user:
+    cursor.execute("SELECT * FROM users WHERE email = ?", (data.email,))
+    user = cursor.fetchone()
+
+    if user:
+        # ⚠️ VULNERABILITATEA 1: Token predictibil (ușor de ghicit)
+        # Transformăm pur și simplu adresa de email în Base64. 
+        # Nu există nicio sursă de "entropie" (aleatoriu).
+        token = base64.urlsafe_b64encode(data.email.encode('utf-8')).decode('utf-8').rstrip('=')
+        
+        # Salvăm token-ul. 
+        # ⚠️ VULNERABILITATEA 2: Nu asociem nicio dată de expirare (timestamp).
+        cursor.execute("INSERT INTO reset_tokens (email, token) VALUES (?, ?)", (data.email, token))
+        conn.commit()
         conn.close()
-        raise HTTPException(status_code=401, detail="Email sau parolă incorectă")  # Mesaj generic pentru securitate
+        
+        # Simulăm trimiterea unui email
+        return {"message": "Link trimis!", "link": f"http://127.0.0.1:8000/reset-password?token={token}"}
+        
+    # Păstrăm totuși protecția anti-enumerare despre care am vorbit anterior
+    conn.close()
+    return {"message": "Dacă emailul există, s-a trimis un link."}
+
+@app.post("/reset-password")
+def reset_password(data: PasswordChange):
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    # Verificare parolă cu scrypt
-    stored_hash = bytes.fromhex(db_user['password_hash'])
-    salt = stored_hash[:16]  # Presupunem că primii 16 bytes sunt salt-ul
-    try:
-        computed_hash = hashlib.scrypt(user.password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
-        if computed_hash != stored_hash:
-            print("Computed hash nu se potrivește cu hash-ul stocat" + computed_hash + " vs " + db_user['password_hash'])
-            conn.close()
-            raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
-    except:
+    # Verificăm dacă tokenul există în baza de date
+    normalized_token = data.token.rstrip('=')
+    cursor.execute("SELECT email FROM reset_tokens WHERE token = ? OR rtrim(token, '=') = ?", (data.token, normalized_token))
+    result = cursor.fetchone()
+    
+    # ⚠️ VULNERABILITATEA 2 (Continuare): Acceptăm tokenul oricând, 
+    # chiar și după 5 ani de la generare.
+    if not result:
         conn.close()
-        raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
+        raise HTTPException(status_code=400, detail="Token invalid")
     
+    # Resetăm efectiv parola
+    email = result[0]
+    cursor.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hashlib.md5(data.new_password.encode()).hexdigest(), email))
+    conn.commit()
     conn.close()
     
-    # Creare sesiune securizată
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-    session_token = create_session(db_user['id'], ip_address, user_agent)
+    # ⚠️ VULNERABILITATEA 3: Token reutilizabil.
+    # Intenționat "uităm" să ștergem tokenul din dicționar după folosire.
+    # În mod normal, ar trebui să facem: del reset_tokens[token]
     
-    # Setare cookie securizat
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,      # Nu poate fi accesat din JavaScript
-        secure=False,       # False pentru development (localhost)
-        samesite="lax",     # Protecție CSRF
-        max_age=43200       # 12 ore în secunde
-    )
-    
-    return {"message": "Login reușit! Sesiune securizată creată."}
-
-@app.post("/logout")
-def post_logout(request: Request, response: Response):
-    """Logout securizat - invalidează sesiunea"""
-    session_token = request.cookies.get("session_token")
-    
-    if session_token:
-        invalidate_session(session_token)
-    
-    # Șterge cookie-ul
-    response.delete_cookie(
-        key="session_token",
-        httponly=True,
-        secure=False,
-        samesite="lax"
-    )
-    
-    return {"message": "Logout reușit! Sesiunea a fost invalidată."}
-
-@app.get("/dashboard")
-def get_dashboard(request: Request):
-    """Rută protejată care necesită autentificare"""
-    session_token = request.cookies.get("session_token")
-    
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Autentificare necesară")
-    
-    user_id = validate_session(session_token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Sesiune expirată sau invalidă")
-    
-    # Rotește token-ul pentru securitate suplimentară
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-    new_token = rotate_session(session_token, ip_address, user_agent)
-    
-    if new_token:
-        # Returnează răspuns cu token nou
-        response = FileResponse("./html/dashboard.html", media_type="text/html")
-        response.set_cookie(
-            key="session_token",
-            value=new_token,
-            httponly=True,
-            secure=False,
-            samesite="lax",
-            max_age=86400
-        )
-        return response
-    else:
-        raise HTTPException(status_code=401, detail="Eroare la rotirea sesiunii")
-
-
-
+    return {"message": f"Parola pentru {email} a fost resetată cu succes!"}

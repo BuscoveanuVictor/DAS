@@ -47,13 +47,7 @@
         const passwordVal = document.getElementById('password').value;
         const messageDiv = document.getElementById('message');
 
-        let API;
-
-        if(window.location.href.includes("nonvulnerable")){
-            API = 'http://127.0.0.1:8000/nonvulnerable/register';   
-        } else {
-            API = 'http://127.0.0.1:8000/vulnerable/register';
-        }
+        const API = 'http://127.0.0.1:8000/register';      
 
         try {
             // Trimitem datele către backend-ul FastAPI sub formă de JSON
@@ -69,8 +63,7 @@
 
             // Verificăm dacă request-ul a avut succes
             if (response.ok) {
-                messageDiv.style.color = 'green';
-                messageDiv.innerText = "Succes: " + data.message;
+                window.location.href = "/";  
             } else {
                 messageDiv.style.color = 'red';
                 // Afișăm detaliul erorii (ex: "User deja existent")
