@@ -13,9 +13,12 @@ def create_database():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        salt TEXT DEFAULT '',
         role TEXT NOT NULL DEFAULT 'USER',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        locked BOOLEAN DEFAULT 0
+        locked BOOLEAN DEFAULT 0,
+        failed_attempts INTEGER DEFAULT 0,
+        lockout_until TIMESTAMP
     )
     ''')
 
@@ -64,7 +67,8 @@ def create_database():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT NOT NULL,
         token TEXT UNIQUE NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
 
