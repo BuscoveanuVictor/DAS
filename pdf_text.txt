@@ -1,0 +1,661 @@
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+
+Proiect #2
+
+Break the Login – Atacarea și securizarea autentificării
+Obiectiv
+
+Scenariu
+
+Scopul proiectului este ca studentul să înțeleagă cum este atacat în practică
+un sistem de autentificare și cum trebuie implementat corect pentru a rezista
+atacurilor reale.
+Studentul va:
+• construi un mecanism de autentificare funcțional, dar inițial
+vulnerabil;
+• demonstra exploatarea lui prin tehnici de ethical hacking;
+• remedia vulnerabilitățile prin implementarea controalelor corecte de
+securitate;
+• valida că atacurile nu mai funcționează după fix.
+Accentul cade pe:
+• logică de autentificare;
+• parole;
+• sesiuni / token-uri;
+• resetare parolă;
+nu pe funcționalități de business complexe.
+Compania fictivă “AuthX” dezvoltă o aplicație internă folosită de angajați
+pentru acces la resurse sensibile.
+Aplicația este deja folosită în producție, dar echipa de securitate a semnalat
+probleme serioase legate de autentificare.
+Studentul joacă dublu rol în proiect:
+• Security tester – identifică și demonstrează vulnerabilitățile;
+• Developer – repară implementarea și întărește sistemul.
+Auditul se concentrează exclusiv pe:
+• login;
+• gestionarea parolelor;
+• sesiuni;
+• resetarea parolei.
+
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+
+Funcționalități obligatorii – Mecanism de autentificare
+Nr.
+
+Funcționalitate
+
+3.1
+
+Înregistrare utilizator
+(Register)
+
+Ce trebuie să implementeze studentul
+Formular de creare cont cu email/username
+și parolă
+Stocarea utilizatorului într-o bază de date
+reală
+Asocierea unui rol simplu (ex: USER)
+Formular de login cu username + parolă
+
+3.2
+
+3.3
+
+3.4
+
+Autentificare (Login)
+
+Logout
+
+Verificarea credențialelor în backend
+Crearea unei sesiuni (cookie) sau token
+(JWT)
+Transmiterea sesiunii/token-ului către
+client
+Invalidarea sesiunii sau a token-ului
+Ștergerea cookie-ului sau marcarea tokenului ca invalid
+Funcționalitate „Forgot password”
+Generarea unui token de resetare
+
+Resetare parolă
+
+Endpoint pentru setarea unei parole noi
+Menținerea autentificării între request-uri
+3.5
+
+Gestionare sesiuni
+
+Asocierea request-urilor cu utilizatorul
+logat
+
+Observații importante
+Input-ul trebuie validat în
+backend
+DB reală (ex: PostgreSQL,
+SQLite)
+Rolul va fi folosit ulterior la
+autorizare
+Răspuns inițial diferențiat
+(vulnerabil)
+Fără logică doar în UI
+Model ales clar și documentat
+Cu setări inițial incomplete
+(intenționat)
+După logout sesiunea nu mai
+este validă
+Necesită verificare practică
+Implementare inițial
+simplificată
+Inițial predictibil sau
+reutilizabil
+Fără controale avansate la
+început
+Cookie sau token trimis
+automat
+Baza pentru access control
+
+Cerințe de securitate
+Nr.
+
+Categoria
+
+4.1
+
+Password
+Policy slab
+
+4.2
+
+Stocare
+nesigură a
+parolelor
+
+Vulnerabilitate inițială
+(v1)
+– Sunt acceptate parole
+foarte scurte sau triviale–
+Nu există validare la
+înregistrare
+– Parole stocate în clar–
+Sau hash slab
+(MD5/SHA1)
+
+Atac demonstrat (PoC)
+
+Fix obligatoriu (v2)
+
+– Creare conturi cu parole
+extrem de slabe– Explicarea
+riscului de credential
+stuffing / brute force
+
+– Lungime minimă
+parolă– Complexitate
+minimă– Mesaj de eroare
+generic
+
+– Acces la DB (simulat) și
+vizualizare parole–
+
+– Hash modern (bcrypt /
+argon2 / scrypt)– Salt
+
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+Demonstrarea cât de ușor
+pot fi compromise
+4.3
+
+Brute force /
+lipsă rate
+limiting
+
+– Număr nelimitat de
+încercări login– Fără
+blocare cont
+
+– Script/tool simplu care
+încearcă parole multiple
+
+4.4
+
+User
+Enumeration
+
+– Mesaje diferite pentru
+„user inexistent” vs „parolă
+greșită”
+
+– Enumerarea utilizatorilor
+existenți pe baza mesajelor
+
+4.5
+
+Gestionare
+nesigură a
+sesiunilor
+
+– Cookie fără HttpOnly /
+Secure / SameSite– Token
+cu expirare prea lungă
+
+– Reutilizarea sesiunii–
+Explicarea riscului în
+prezența XSS
+
+4.6
+
+Resetare parolă
+nesigură
+
+– Token predictibil– Token
+reutilizabil– Fără expirare
+
+– Resetarea parolei fără
+control corect
+
+implicit– Nicio parolă în
+clar în DB
+– Rate limiting pe login–
+Blocare temporară după N
+încercări– Logarea
+tentativelor
+– Mesaj unic: „Invalid
+credentials”– Timp de
+răspuns uniform
+– Cookie-uri securizate–
+Expirare sesiune– Rotație
+token la login– Invalidare
+la logout
+– Token random, onetime– Expirare scurtă–
+Invalidare după utilizare
+
+Cerințe de livrare
+Nr.
+
+Livrabil
+
+1
+
+Cod sursă
+
+2
+
+Raport de securitate (mini
+pentest)
+
+3
+
+Dovezi practice
+
+Ce trebuie să conțină
+Aplicația completă
+funcțională
+Două versiuni distincte
+Structură clară a proiectului
+Descrierea fiecărei
+vulnerabilități
+Pașii de exploatare (PoC)
+Impactul vulnerabilității
+Fix-ul implementat
+Re-test
+Request / response relevante
+Capturi de ecran
+Exemple de input malițios
+
+Clarificări / Criterii
+Codul trebuie să poată fi rulat local
+vulnerable și fixed (branch-uri sau tag-uri
+clare)
+Fără cod duplicat inutil
+Mapată pe cerințele proiectului
+Explicați clar, reproductibil
+Ce poate obține un atacator
+Explicat concis, cu referință la cod
+Dovadă că atacul nu mai funcționează
+Curl, Postman sau Burp
+Burp Suite / Postman
+Input folosit în PoC (safe, de laborator)
+
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+
+Ghid de implementare
+Nr.
+
+Etapa
+
+1
+
+Acces aplicație
+
+2
+3
+4
+5
+
+Register –
+trimitere date
+Register –
+validare
+Register –
+existență user
+Register – parolă
+
+10
+
+Register –
+persistare
+Login – trimitere
+date
+Login –
+verificare user
+Login –
+verificare parolă
+Login – succes
+
+11
+
+Login – răspuns
+
+6
+7
+8
+9
+
+16
+
+După login
+(general)
+Identitate
+Autorizare
+Gestionare
+sesiune
+Logout
+
+17
+
+Forgot password
+
+18
+
+Reset password
+
+19
+
+Final reset
+
+20
+
+Ethical hacking
+
+21
+
+Fix
+
+12
+13
+14
+15
+
+Ce face
+utilizatorul
+Deschide
+aplicația
+Completează
+email + parolă
+–
+
+Validează formatul și lungimea
+datelor
+
+–
+
+Verifică dacă userul există deja
+
+–
+
+Hash-uiește parola (nu o stochează
+în clar)
+
+De ce contează din punct de
+vedere al securității
+Tot input-ul din browser este
+nesigur
+Aici pot apărea parole slabe și
+input malițios
+Previne date invalide sau
+periculoase
+Evită conflicte și scurgeri de
+informații
+Protejează parolele dacă DB
+este compromis
+
+–
+
+Salvează utilizatorul în baza de date
+
+DB reală → securitate realistă
+
+Introduce user
++ parolă
+
+Primește credențialele
+
+Punct clasic de atac
+
+–
+
+Caută utilizatorul în DB
+
+Evită user enumeration
+
+–
+
+Compară parola cu hash-ul
+
+Autentificare corectă
+
+–
+Primește
+confirmare
+Face orice
+acțiune
+–
+–
+Navighează în
+aplicație
+Apasă Logout
+Cere resetare
+parolă
+Accesează
+link
+–
+Încearcă
+atacuri
+
+Creează sesiune / token
+
+Leagă browserul de utilizator
+
+Trimite cookie / token
+
+Setări greșite = risc major
+
+–
+
+Ce face aplicația (pe scurt)
+Afișează pagina Register / Login
+Primește datele de la client
+
+Identifică utilizatorul curent
+Decide dacă userul are voie
+
+Fără asta, oricine poate face
+orice
+Bază pentru autorizare
+Previne acces neautorizat
+
+Verifică validitatea sesiunii
+
+Previne reutilizarea
+
+Invalidează sesiunea/token-ul
+
+Previne hijacking
+Token slab = compromitere
+cont
+
+Verifică sesiunea/token-ul
+
+Generează token aleator
+Permite setarea noii parole
+
+Control strict necesar
+
+Invalidează token-ul
+
+Previne reutilizarea
+
+Permite testare controlată
+
+Demonstrează vulnerabilitățile
+
+Adaugă protecții (rate limit, mesaje
+generice etc.)
+
+Întărește sistemul
+
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+22
+
+Re-test
+
+23
+
+Mentalitate
+
+Repetă
+atacurile
+–
+
+Verifică că nu mai funcționează
+
+Confirmă securizarea
+
+Gândește ca un atacator
+
+Secure by design
+
+Structură minimă de bază de date (nivel mediu, realist)
+
+1. Tabelul users
+Câmp
+id
+email
+password_hash
+role
+created_at
+locked
+
+Tip (exemplu)
+int / uuid (PK)
+string (unique)
+string
+enum
+timestamp
+boolean
+
+Descriere
+Identificator unic utilizator
+Username / email
+Hash parolă (bcrypt / argon2)
+ANALYST / MANAGER
+Data creării contului
+Cont blocat (brute-force)
+
+2. Tabelul tickets
+Câmp
+Tip
+Descriere
+id
+int / uuid (PK) Identificator ticket
+title
+string
+Titlu ticket
+description text
+Conținut (posibil XSS dacă nu e tratat)
+severity
+enum
+LOW / MED / HIGH
+status
+enum
+OPEN / IN_PROGRESS / RESOLVED
+owner_id
+FK → users.id Cine a creat ticket-ul
+created_at timestamp
+Data creării
+updated_at timestamp
+Ultima modificare
+owner_id este cheia pentru prevenirea IDOR.
+
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+3. Tabelul audit_logs
+Câmp
+id
+user_id
+action
+resource
+resource_id
+timestamp
+ip_address
+
+Tip
+int / uuid (PK)
+FK → users.id
+string
+string
+string
+timestamp
+string
+
+Descriere
+Identificator eveniment
+Cine a făcut acțiunea
+LOGIN / CREATE_TICKET / etc
+ticket / auth / audit
+ID-ul resursei afectate
+Când s-a întâmplat
+IP (pentru realism)
+
+Relațiile dintre tabele (foarte important pentru securitate)
+Relație
+users → tickets (1:N)
+users → audit_logs (1:N)
+tickets → audit_logs (1:N)
+
+De ce contează
+Permite verificarea ownership-ului
+Cine a făcut ce
+Ce s-a întâmplat cu un ticket
+
+Cum este folosită DB în fluxul de securitate
+Funcționalitate
+Login
+View ticket
+Edit ticket
+Search
+Audit
+Brute force
+
+Ce verifici în DB
+User + password_hash
+ticket.owner_id == user.id
+Rol + ownership
+Query parametrizat
+Insert la fiecare acțiune
+Cont blocat după N încercări
+
+Ce DB puteți utiliza?
+Opțiune
+PostgreSQL
+MySQL
+SQLite
+MongoDB
+
+De ce e bună
+SQL real, bun pentru injection labs
+Foarte comun în industrie
+Simplu, local, suficient pentru proiect
+Acceptabil dacă vrei NoSQL injection
+
+Recomandare pentru curs: PostgreSQL sau SQLite, ca să rămână ușor de rulat local
+
+Curs: Dezvoltarea Aplicațiilor Software Securizate
+Facultatea de Matematică și Informatică
+Universitatea din București
+Conf. Univ. Dr. Marius Iulian Mihăilescu
+marius-iulian.mihailescu@unibuc.ro
+
+
