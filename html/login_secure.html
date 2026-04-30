@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuthX - Login (Securizat)</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #1a252f; margin: 0; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); width: 320px; }
+        h2 { text-align: center; color: #27ae60; margin-top: 0; }
+        .badge { text-align: center; font-size: 11px; color: #27ae60; font-weight: bold; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button:hover { background-color: #219150; }
+        #message { margin-top: 15px; text-align: center; font-weight: bold; font-size: 14px; }
+        .links { margin-top: 15px; text-align: center; font-size: 12px; }
+        .links a { color: #27ae60; text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>AuthX - Login v2</h2>
+    <div class="badge"> Versiune Securizata</div>
+    <form id="loginForm">
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        <div class="form-group">
+            <label for="password">Parola:</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <button type="submit">Autentificare</button>
+    </form>
+    <div id="message"></div>
+    <div class="links">
+        <p>Nu ai cont? <a href="register">Inregistreaza-te</a></p>
+        <p><a href="reset-password">Ai uitat parola?</a></p>
+    </div>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        const emailVal    = document.getElementById('email').value;
+        const passwordVal = document.getElementById('password').value;
+        const messageDiv  = document.getElementById('message');
+
+        // Versiunea securizata trimite catre portul 8001
+        const API = "http://127.0.0.1:8001/login";
+
+        try {
+            const response = await fetch(API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',   // include cookie-ul de sesiune
+                body: JSON.stringify({ email: emailVal, password: passwordVal })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                window.location.href = "/dashboard";
+            } else {
+                messageDiv.style.color = 'red';
+                // FIX 4.4 - mesaj generic, nu detalii despre cauza esecului
+                messageDiv.innerText = "Eroare: " + data.detail;
+            }
+        } catch (error) {
+            messageDiv.style.color = 'red';
+            messageDiv.innerText = "Eroare de conexiune. Serverul ruleaza?";
+        }
+    });
+</script>
+
+</body>
+</html>

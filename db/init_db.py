@@ -74,7 +74,7 @@ def create_database():
 
     conn.commit()
     conn.close()
-    print("Baza de date și tabelele au fost create cu succes!")
+    print("Baza de date si tabelele au fost create cu succes!")
 
 if __name__ == "__main__":
     create_database()

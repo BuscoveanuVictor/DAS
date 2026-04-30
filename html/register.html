@@ -27,12 +27,12 @@
         </div>
 
         <div class="form-group">
-            <label for="password">Parolă:</label>
+            <label for="password">Parola:</label>
             <input type="password" id="password" name="password" required>
-            <small style="color: gray;">(Fără validare intenționat)</small>
+            <small style="color: gray;">(Fara validare intentionat)</small>
         </div>
 
-        <button type="submit">Creează Cont</button>
+        <button type="submit">Creeaza Cont</button>
     </form>
     
     <div id="message"></div>
@@ -50,7 +50,7 @@
         const API = 'http://127.0.0.1:8000/register';      
 
         try {
-            // Trimitem datele către backend-ul FastAPI sub formă de JSON
+            // Trimitem datele catre backend-ul FastAPI sub forma de JSON
             const response = await fetch(API, {
                 method: 'POST',
                 headers: {
@@ -61,12 +61,12 @@
 
             const data = await response.json();
 
-            // Verificăm dacă request-ul a avut succes
+            // Verificam daca request-ul a avut succes
             if (response.ok) {
                 window.location.href = "/";  
             } else {
                 messageDiv.style.color = 'red';
-                // Afișăm detaliul erorii (ex: "User deja existent")
+                // Afisam detaliul erorii (ex: "User deja existent")
                 messageDiv.innerText = "Eroare: " + data.detail; 
             }
         } catch (error) {
