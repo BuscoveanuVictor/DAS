@@ -1,17 +1,3 @@
-"""
-AuthX - Versiunea SECURIZATA (v2)
-Toate vulnerabilitatile din v1 (main.py) au fost remediate conform baremului.
-
-Fix-uri aplicate:
-  FIX 4.1 - Password Policy: minim 8 caractere, litera mare/mica, cifra, caracter special
-  FIX 4.2 - Stocare parola: bcrypt cu salt automat (in loc de MD5)
-  FIX 4.3 - Rate Limiting: blocare cont 15 min dupa 5 incercari esuate, logare tentative
-  FIX 4.4 - User Enumeration: mesaj unic "Credentiale invalide" indiferent de motiv
-  FIX 4.5 - Sesiuni securizate: HttpOnly, SameSite=Strict, expirare scurta,
-             rotatie token la login, invalidare la logout
-  FIX 4.6 - Reset parola: token random (secrets), expirare 1 ora, stergere dupa utilizare
-"""
-
 import re
 import bcrypt
 import secrets
@@ -91,14 +77,17 @@ def get_lockout_until(email: str, conn) -> Optional[datetime]:
     cursor.execute(
         "SELECT locked, lockout_until FROM users WHERE email = ?", (email,)
     )
+
     row = cursor.fetchone()
     if not row or not row['locked']:
         return None
     if row['lockout_until'] is None:
         return None
+
     lockout_until = datetime.fromisoformat(row['lockout_until'])
     if datetime.now() < lockout_until:
         return lockout_until
+
     # Blocarea a expirat -> deblocare automata
     cursor.execute(
         "UPDATE users SET locked = 0, failed_attempts = 0, lockout_until = NULL WHERE email = ?",
@@ -109,7 +98,7 @@ def get_lockout_until(email: str, conn) -> Optional[datetime]:
 
 
 def record_failed_attempt(email: str, conn):
-    """Incrementeaza contorul de esecuri si blocheaza dupa MAX_LOGIN_ATTEMPTS."""
+    # Incrementeaza contorul de esecuri si blocheaza dupa MAX_LOGIN_ATTEMPTS.
     cursor = conn.cursor()
     cursor.execute("SELECT failed_attempts FROM users WHERE email = ?", (email,))
     row = cursor.fetchone()
@@ -138,7 +127,7 @@ def record_failed_attempt(email: str, conn):
 
 
 def reset_failed_attempts(email: str, conn):
-    """Reseteaza contorul de esecuri dupa un login reusit."""
+    # Reseteaza contorul de esecuri dupa un login reusit.
     cursor = conn.cursor()
     cursor.execute(
         "UPDATE users SET failed_attempts = 0, locked = 0, lockout_until = NULL WHERE email = ?",
@@ -148,7 +137,7 @@ def reset_failed_attempts(email: str, conn):
 
 #  FIX 4.5 - Gestionare sesiuni securizate 
 def create_session(user_id: int, ip_address=None, user_agent=None) -> str:
-    """Creeaza sesiune cu token criptografic securizat."""
+    # Creeaza sesiune cu token criptografic securizat. 
     conn = get_db_connection()
     cursor = conn.cursor()
     # FIX 4.5: token random, nu user_id predictibil
@@ -165,7 +154,7 @@ def create_session(user_id: int, ip_address=None, user_agent=None) -> str:
 
 
 def validate_session(session_token: str) -> Optional[int]:
-    """Returneaza user_id daca sesiunea e valida si neexpirata."""
+    # Returneaza user_id daca sesiunea e valida si neexpirata.
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -178,7 +167,7 @@ def validate_session(session_token: str) -> Optional[int]:
 
 
 def invalidate_session(session_token: str):
-    """Sterge sesiunea din DB (logout / rotatie token)."""
+    # Sterge sesiunea din DB (logout / rotatie token).
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM sessions WHERE session_token = ?", (session_token,))
@@ -187,7 +176,7 @@ def invalidate_session(session_token: str):
 
 
 def rotate_session(old_token: str, ip_address=None, user_agent=None) -> Optional[str]:
-    """Rotatie token: invalideaza vechea sesiune si creeaza una noua."""
+    # Rotatie token: invalideaza vechea sesiune si creeaza una noua.
     user_id = validate_session(old_token)
     if user_id:
         invalidate_session(old_token)

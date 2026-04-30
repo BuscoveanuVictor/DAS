@@ -41,10 +41,13 @@ def login(user: UserLogin, response: Response):
     cursor.execute("SELECT * FROM users WHERE email = ?", (user.email,))
     db_user = cursor.fetchone()
     
+    # [4.3] Brute Force: nu exista limita de incercari, oricine poate incerca parole nelimitat
+    # [4.4] User Enumeration: mesaje de eroare diferite dezvaluie daca emailul exista sau nu
     if not db_user:
         conn.close()
         raise HTTPException(status_code=404, detail="User inexistent")
     
+    # [4.2] Stocare nesigura: recalculam MD5 fara salt pentru comparatie
     password_hash = hashlib.md5(user.password.encode()).hexdigest()
     
     if db_user['password_hash'] != password_hash:
@@ -53,7 +56,7 @@ def login(user: UserLogin, response: Response):
     
     conn.close()
     
-    # Lipseste HttpOnly, Secure si SameSite
+    # [4.5] Sesiune nesigura: cookie = ID-ul numeric al userului, predictibil si fara HttpOnly
     session_token = f"{db_user['id']}" 
     response.set_cookie(key="session_id", value=session_token)
     
@@ -75,6 +78,8 @@ def register(user: UserRegister):
         conn.close()
         raise HTTPException(status_code=400, detail="User deja existent")
 
+    # [4.1] Politica de parola slaba: nu se valideaza lungimea sau complexitatea parolei
+    # [4.2] Stocare nesigura: MD5 fara salt, extrem de usor de spart
     password_hash = hashlib.md5(user.password.encode()).hexdigest()
     
     db.execute(
@@ -108,21 +113,16 @@ def request_password_reset(data: ResetRequest):
     user = cursor.fetchone()
 
     if user:
-        # VULNERABILITATEA 1: Token predictibil (usor de ghicit)
-        # Transformam pur si simplu adresa de email in Base64. 
-        # Nu exista nicio sursa de "entropie" (aleatoriu).
+        # [4.6a] Token predictibil: Base64(email) poate fi calculat de oricine fara sa interactioneze cu serverul
         token = base64.urlsafe_b64encode(data.email.encode('utf-8')).decode('utf-8').rstrip('=')
         
-        # Salvam token-ul. 
-        # VULNERABILITATEA 2: Nu asociem nicio data de expirare (timestamp).
+        # [4.6b] Token fara expirare: tokenul ramane valid pe termen nelimitat
         cursor.execute("INSERT INTO reset_tokens (email, token) VALUES (?, ?)", (data.email, token))
         conn.commit()
         conn.close()
         
-        # Simulam trimiterea unui email
         return {"message": "Link trimis!", "link": f"http://127.0.0.1:8000/reset-password?token={token}"}
         
-    # Pastram totusi protectia anti-enumerare despre care am vorbit anterior
     conn.close()
     return {"message": "Daca emailul exista, s-a trimis un link."}
 
@@ -131,25 +131,22 @@ def reset_password(data: PasswordChange):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Verificam daca tokenul exista in baza de date
+    
     normalized_token = data.token.rstrip('=')
     cursor.execute("SELECT email FROM reset_tokens WHERE token = ? OR rtrim(token, '=') = ?", (data.token, normalized_token))
     result = cursor.fetchone()
     
-    # VULNERABILITATEA 2 : Acceptam tokenul oricand, 
-    # chiar si dupa 5 ani de la generare.
+    # [4.6b] Token fara expirare: acceptam tokenul oricand, chiar si dupa ani de la generare
     if not result:
         conn.close()
         raise HTTPException(status_code=400, detail="Token invalid")
     
-    # Resetam efectiv parola
     email = result[0]
+    # [4.2] Stocare nesigura: parola noua tot MD5 fara salt
     cursor.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hashlib.md5(data.new_password.encode()).hexdigest(), email))
     conn.commit()
     conn.close()
     
-    # VULNERABILITATEA 3: Token reutilizabil.
-    # Intentionat "uitam" sa stergem tokenul din dictionar dupa folosire.
-    # In mod normal, ar trebui sa facem: del reset_tokens[token]
+    # [4.6c] Token reutilizabil: nu stergem tokenul dupa folosire, poate fi folosit de ori cate ori
     
     return {"message": f"Parola pentru {email} a fost resetata cu succes!"}

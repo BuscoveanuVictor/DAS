@@ -1,2 +1,8 @@
-__pycache__venv/
+__pycache__/
+venv/
 db/database.db
+*.pdf
+*.docx
+*.mkv
+*.pyc
+*.txt
